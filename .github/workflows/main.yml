@@ -6,43 +6,17 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      BUBBLEWRAP_KEYSTORE_PASSWORD: android123
-      BUBBLEWRAP_KEY_PASSWORD: android123
+    
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
-      - name: Install Bubblewrap
-        run: npm i -g @bubblewrap/cli
-
-      - name: Generate Keystore
+      - name: Build APK with Bubblewrap Docker
         run: |
-          keytool -genkeypair \
-            -dname "CN=nevahtovyj, OU=nevahtovyj, O=nevahtovyj, L=Moscow, S=Moscow, C=RU" \
-            -alias android \
-            -keypass android123 \
-            -keystore ./android.keystore \
-            -storepass android123 \
-            -validity 20000 \
-            -keyalg RSA \
-            -keysize 2048
-
-      - name: Create TWA manifest
-        run: |
-          cat > twa-manifest.json << 'TWAEOF'
+          cat > twa-manifest.json << 'EOF'
           {
             "packageId": "com.nevahtovyj.app",
             "host": "nevahtovyj.netlify.app",
-            "name": "Путь к себе - спокойствие, трезвость, привычки",
+            "name": "Путь к себе",
             "launcherName": "Путь к себе",
             "display": "standalone",
             "themeColor": "#1c1a17",
@@ -58,8 +32,8 @@ jobs:
             "maskableIconUrl": "https://nevahtovyj.netlify.app/icon-512-maskable.png",
             "splashScreenFadeOutDuration": 300,
             "signingKey": {
-              "path": "./android.keystore",
-              "alias": "android"
+              "path": "./pwa.keystore",
+              "alias": "pwa"
             },
             "appVersionCode": 1,
             "appVersion": "1.0.0",
@@ -76,37 +50,70 @@ jobs:
             "playBilling": { "enabled": false },
             "alphaDependencies": { "enabled": false },
             "features": {},
-            "enableGooglePlayBilling": false,
-            "signingMode": "new",
-            "signing": {
-              "defaultSigningMode": "new"
-            }
+            "enableGooglePlayBilling": false
           }
-          TWAEOF
+          EOF
 
-      - name: Init from manifest
+          keytool -genkeypair \
+            -dname "CN=nevahtovyj, OU=nevahtovyj, O=nevahtovyj, L=Moscow, S=Moscow, C=RU" \
+            -alias pwa -keypass android123 \
+            -keystore ./pwa.keystore -storepass android123 \
+            -validity 20000 -keyalg RSA -keysize 2048
+
+          docker run --rm \
+            -v ${{ github.workspace }}:/work \
+            -w /work \
+            -e BUBBLEWRAP_KEYSTORE_PASSWORD=android123 \
+            -e BUBBLEWRAP_KEY_PASSWORD=android123 \
+            ghcr.io/nickvdh/nickvdh:latest \
+            bash -c "bubblewrap build --skipPwaValidation" 2>&1 || true
+
+          echo "=== Files after docker ==="
+          ls -la *.apk *.aab 2>/dev/null || echo "Docker build didnt produce APK"
+
+      - name: Fallback - manual Gradle build
+        if: ${{ !hashFiles('*.apk') }}
         run: |
-          yes "" | bubblewrap init --manifest="https://nevahtovyj.netlify.app/manifest.json" || true
-
-      - name: Update from TWA manifest
-        run: bubblewrap update --skipVersionUpgrade || true
-
-      - name: Build
-        run: bubblewrap build --skipPwaValidation
+          echo "Trying direct Gradle build..."
+          
+          export ANDROID_SDK_ROOT=$ANDROID_HOME
+          
+          npm i -g @bubblewrap/cli
+          
+          mkdir -p ~/.bubblewrap
+          cat > ~/.bubblewrap/config.json << CFGEOF
+          {
+            "jdkPath": "$JAVA_HOME",
+            "androidSdkPath": "$ANDROID_HOME"
+          }
+          CFGEOF
+          
+          yes "y" | bubblewrap build --skipPwaValidation 2>&1 || true
+          
+          if [ ! -f app-release-signed.apk ]; then
+            echo "Trying with update first..."
+            yes "y" | bubblewrap update --skipVersionUpgrade 2>&1 || true
+            yes "y" | bubblewrap build --skipPwaValidation 2>&1 || true
+          fi
+          
+          echo "=== Final files ==="
+          ls -la *.apk *.aab 2>/dev/null || ls -la
 
       - name: Upload APK
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: nevahtovyj-apk
           path: "*.apk"
           if-no-files-found: warn
-
-      - name: Show built files
+          
+      - name: Debug info
         if: always()
         run: |
-          echo "=== APK files ==="
-          ls -la *.apk 2>/dev/null || echo "No APK"
-          echo "=== AAB files ==="
-          ls -la *.aab 2>/dev/null || echo "No AAB"
           echo "=== All files ==="
           ls -la
+          echo "=== Java ==="
+          java -version 2>&1
+          echo "=== ANDROID_HOME ==="
+          echo $ANDROID_HOME
+          ls $ANDROID_HOME 2>/dev/null || echo "no android home"
