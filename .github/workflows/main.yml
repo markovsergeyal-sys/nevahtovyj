@@ -1,0 +1,45 @@
+name: Build APK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install Bubblewrap
+        run: npm i -g @bubblewrap/cli
+
+      - name: Generate Keystore
+        run: |
+          keytool -genkeypair -dname "CN=nevahtovyj, OU=nevahtovyj, O=nevahtovyj, L=Moscow, S=Moscow, C=RU" -alias android -keypass android123 -keystore ./android.keystore -storepass android123 -validity 20000 -keyalg RSA -keysize 2048
+
+      - name: Init and Build
+        run: |
+          bubblewrap init --manifest="https://nevahtovyj.netlify.app/manifest.json"
+          bubblewrap build --skipPwaValidation
+        env:
+          BUBBLEWRAP_KEYSTORE_PASSWORD: android123
+          BUBBLEWRAP_KEY_PASSWORD: android123
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: nevahtovyj-apk
+          path: "*.apk"
+          if-no-files-found: warn
+
+      - name: Show files
+        if: always()
+        run: ls -la *.apk *.aab 2>/dev/null || ls -la
