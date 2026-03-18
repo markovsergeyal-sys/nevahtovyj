@@ -6,12 +6,31 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    
+    env:
+      BUBBLEWRAP_KEYSTORE_PASSWORD: android123
+      BUBBLEWRAP_KEY_PASSWORD: android123
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build APK with Bubblewrap Docker
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install Bubblewrap and generate project
         run: |
+          npm i -g @bubblewrap/cli
+          
+          mkdir -p ~/.bubblewrap
+          echo '{"jdkPath":"'$JAVA_HOME'","androidSdkPath":"/usr/local/lib/android/sdk"}' > ~/.bubblewrap/config.json
+          
+          keytool -genkeypair \
+            -dname "CN=nevahtovyj, OU=nevahtovyj, O=nevahtovyj, L=Moscow, S=Moscow, C=RU" \
+            -alias pwa -keypass android123 \
+            -keystore ./pwa.keystore -storepass android123 \
+            -validity 20000 -keyalg RSA -keysize 2048
+
           cat > twa-manifest.json << 'EOF'
           {
             "packageId": "com.nevahtovyj.app",
@@ -54,66 +73,58 @@ jobs:
           }
           EOF
 
-          keytool -genkeypair \
-            -dname "CN=nevahtovyj, OU=nevahtovyj, O=nevahtovyj, L=Moscow, S=Moscow, C=RU" \
-            -alias pwa -keypass android123 \
-            -keystore ./pwa.keystore -storepass android123 \
-            -validity 20000 -keyalg RSA -keysize 2048
+          yes "" | bubblewrap update --skipVersionUpgrade 2>&1 || true
+          echo "Project generated"
 
-          docker run --rm \
-            -v ${{ github.workspace }}:/work \
-            -w /work \
-            -e BUBBLEWRAP_KEYSTORE_PASSWORD=android123 \
-            -e BUBBLEWRAP_KEY_PASSWORD=android123 \
-            ghcr.io/nickvdh/nickvdh:latest \
-            bash -c "bubblewrap build --skipPwaValidation" 2>&1 || true
-
-          echo "=== Files after docker ==="
-          ls -la *.apk *.aab 2>/dev/null || echo "Docker build didnt produce APK"
-
-      - name: Fallback - manual Gradle build
-        if: ${{ !hashFiles('*.apk') }}
+      - name: Build with Gradle directly
         run: |
-          echo "Trying direct Gradle build..."
+          export ANDROID_SDK_ROOT=/usr/local/lib/android/sdk
+          export ANDROID_HOME=/usr/local/lib/android/sdk
           
-          export ANDROID_SDK_ROOT=$ANDROID_HOME
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon 2>&1
           
-          npm i -g @bubblewrap/cli
+          echo "=== Build output ==="
+          find . -name "*.apk" -type f
+
+      - name: Sign APK
+        run: |
+          UNSIGNED=$(find . -name "*release*.apk" -o -name "*unsigned*.apk" | head -1)
           
-          mkdir -p ~/.bubblewrap
-          cat > ~/.bubblewrap/config.json << CFGEOF
-          {
-            "jdkPath": "$JAVA_HOME",
-            "androidSdkPath": "$ANDROID_HOME"
-          }
-          CFGEOF
-          
-          yes "y" | bubblewrap build --skipPwaValidation 2>&1 || true
-          
-          if [ ! -f app-release-signed.apk ]; then
-            echo "Trying with update first..."
-            yes "y" | bubblewrap update --skipVersionUpgrade 2>&1 || true
-            yes "y" | bubblewrap build --skipPwaValidation 2>&1 || true
+          if [ -z "$UNSIGNED" ]; then
+            UNSIGNED=$(find . -name "*.apk" | head -1)
           fi
           
-          echo "=== Final files ==="
-          ls -la *.apk *.aab 2>/dev/null || ls -la
+          echo "Found APK: $UNSIGNED"
+          
+          /usr/local/lib/android/sdk/build-tools/*/zipalign -v 4 "$UNSIGNED" aligned.apk
+          
+          /usr/local/lib/android/sdk/build-tools/*/apksigner sign \
+            --ks ./pwa.keystore \
+            --ks-key-alias pwa \
+            --ks-pass pass:android123 \
+            --key-pass pass:android123 \
+            --out nevahtovyj-signed.apk \
+            aligned.apk
+          
+          echo "=== Signed APK ==="
+          ls -la nevahtovyj-signed.apk
+          
+          /usr/local/lib/android/sdk/build-tools/*/apksigner verify nevahtovyj-signed.apk
+          echo "Signature verified!"
 
       - name: Upload APK
-        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: nevahtovyj-apk
-          path: "*.apk"
-          if-no-files-found: warn
-          
-      - name: Debug info
-        if: always()
+          path: nevahtovyj-signed.apk
+
+      - name: Debug
+        if: failure()
         run: |
-          echo "=== All files ==="
-          ls -la
-          echo "=== Java ==="
-          java -version 2>&1
-          echo "=== ANDROID_HOME ==="
-          echo $ANDROID_HOME
-          ls $ANDROID_HOME 2>/dev/null || echo "no android home"
+          echo "=== All APKs ==="
+          find . -name "*.apk" -type f -exec ls -la {} \;
+          echo "=== Gradle error ==="
+          cat app/build/outputs/logs/*.log 2>/dev/null || true
+          echo "=== Build tools ==="
+          ls /usr/local/lib/android/sdk/build-tools/
