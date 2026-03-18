@@ -6,12 +6,15 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      BUBBLEWRAP_KEYSTORE_PASSWORD: android123
+      BUBBLEWRAP_KEY_PASSWORD: android123
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - uses: actions/setup-java@v4
         with:
@@ -23,15 +26,73 @@ jobs:
 
       - name: Generate Keystore
         run: |
-          keytool -genkeypair -dname "CN=nevahtovyj, OU=nevahtovyj, O=nevahtovyj, L=Moscow, S=Moscow, C=RU" -alias android -keypass android123 -keystore ./android.keystore -storepass android123 -validity 20000 -keyalg RSA -keysize 2048
+          keytool -genkeypair \
+            -dname "CN=nevahtovyj, OU=nevahtovyj, O=nevahtovyj, L=Moscow, S=Moscow, C=RU" \
+            -alias android \
+            -keypass android123 \
+            -keystore ./android.keystore \
+            -storepass android123 \
+            -validity 20000 \
+            -keyalg RSA \
+            -keysize 2048
 
-      - name: Init and Build
+      - name: Create TWA manifest
         run: |
-          bubblewrap init --manifest="https://nevahtovyj.netlify.app/manifest.json"
-          bubblewrap build --skipPwaValidation
-        env:
-          BUBBLEWRAP_KEYSTORE_PASSWORD: android123
-          BUBBLEWRAP_KEY_PASSWORD: android123
+          cat > twa-manifest.json << 'TWAEOF'
+          {
+            "packageId": "com.nevahtovyj.app",
+            "host": "nevahtovyj.netlify.app",
+            "name": "Путь к себе - спокойствие, трезвость, привычки",
+            "launcherName": "Путь к себе",
+            "display": "standalone",
+            "themeColor": "#1c1a17",
+            "themeColorDark": "#1c1a17",
+            "navigationColor": "#1c1a17",
+            "navigationColorDark": "#1c1a17",
+            "navigationDividerColor": "#1c1a17",
+            "navigationDividerColorDark": "#1c1a17",
+            "backgroundColor": "#1c1a17",
+            "enableNotifications": false,
+            "startUrl": "/",
+            "iconUrl": "https://nevahtovyj.netlify.app/icon-512.png",
+            "maskableIconUrl": "https://nevahtovyj.netlify.app/icon-512-maskable.png",
+            "splashScreenFadeOutDuration": 300,
+            "signingKey": {
+              "path": "./android.keystore",
+              "alias": "android"
+            },
+            "appVersionCode": 1,
+            "appVersion": "1.0.0",
+            "shortcuts": [],
+            "generatorApp": "bubblewrap-cli",
+            "webManifestUrl": "https://nevahtovyj.netlify.app/manifest.json",
+            "fallbackType": "customtabs",
+            "enableSiteSettingsShortcut": true,
+            "isChromeOSOnly": false,
+            "orientation": "portrait",
+            "fingerprints": [],
+            "additionalTrustedOrigins": [],
+            "retainedBundles": [],
+            "playBilling": { "enabled": false },
+            "alphaDependencies": { "enabled": false },
+            "features": {},
+            "enableGooglePlayBilling": false,
+            "signingMode": "new",
+            "signing": {
+              "defaultSigningMode": "new"
+            }
+          }
+          TWAEOF
+
+      - name: Init from manifest
+        run: |
+          yes "" | bubblewrap init --manifest="https://nevahtovyj.netlify.app/manifest.json" || true
+
+      - name: Update from TWA manifest
+        run: bubblewrap update --skipVersionUpgrade || true
+
+      - name: Build
+        run: bubblewrap build --skipPwaValidation
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -40,6 +101,12 @@ jobs:
           path: "*.apk"
           if-no-files-found: warn
 
-      - name: Show files
+      - name: Show built files
         if: always()
-        run: ls -la *.apk *.aab 2>/dev/null || ls -la
+        run: |
+          echo "=== APK files ==="
+          ls -la *.apk 2>/dev/null || echo "No APK"
+          echo "=== AAB files ==="
+          ls -la *.aab 2>/dev/null || echo "No AAB"
+          echo "=== All files ==="
+          ls -la
