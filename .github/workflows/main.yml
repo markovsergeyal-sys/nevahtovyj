@@ -74,57 +74,35 @@ jobs:
           EOF
 
           yes "" | bubblewrap update --skipVersionUpgrade 2>&1 || true
-          echo "Project generated"
 
-      - name: Build with Gradle directly
+      - name: Build with Gradle
         run: |
           export ANDROID_SDK_ROOT=/usr/local/lib/android/sdk
           export ANDROID_HOME=/usr/local/lib/android/sdk
-          
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon 2>&1
-          
-          echo "=== Build output ==="
-          find . -name "*.apk" -type f
+          ./gradlew assembleRelease --no-daemon
 
       - name: Sign APK
         run: |
-          UNSIGNED=$(find . -name "*release*.apk" -o -name "*unsigned*.apk" | head -1)
+          BT=/usr/local/lib/android/sdk/build-tools/36.1.0
           
-          if [ -z "$UNSIGNED" ]; then
-            UNSIGNED=$(find . -name "*.apk" | head -1)
-          fi
+          $BT/zipalign -f -v 4 app/build/outputs/apk/release/app-release-unsigned.apk aligned.apk
           
-          echo "Found APK: $UNSIGNED"
-          
-          /usr/local/lib/android/sdk/build-tools/*/zipalign -v 4 "$UNSIGNED" aligned.apk
-          
-          /usr/local/lib/android/sdk/build-tools/*/apksigner sign \
+          $BT/apksigner sign \
             --ks ./pwa.keystore \
             --ks-key-alias pwa \
             --ks-pass pass:android123 \
             --key-pass pass:android123 \
-            --out nevahtovyj-signed.apk \
+            --v2-signing-enabled true \
+            --v3-signing-enabled true \
+            --out nevahtovyj.apk \
             aligned.apk
           
-          echo "=== Signed APK ==="
-          ls -la nevahtovyj-signed.apk
-          
-          /usr/local/lib/android/sdk/build-tools/*/apksigner verify nevahtovyj-signed.apk
-          echo "Signature verified!"
+          $BT/apksigner verify --verbose nevahtovyj.apk
+          ls -la nevahtovyj.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: nevahtovyj-apk
-          path: nevahtovyj-signed.apk
-
-      - name: Debug
-        if: failure()
-        run: |
-          echo "=== All APKs ==="
-          find . -name "*.apk" -type f -exec ls -la {} \;
-          echo "=== Gradle error ==="
-          cat app/build/outputs/logs/*.log 2>/dev/null || true
-          echo "=== Build tools ==="
-          ls /usr/local/lib/android/sdk/build-tools/
+          path: nevahtovyj.apk
