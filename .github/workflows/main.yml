@@ -54,8 +54,8 @@ jobs:
               "path": "./pwa.keystore",
               "alias": "pwa"
             },
-            "appVersionCode": 2,
-            "appVersion": "1.0.1",
+            "appVersionCode": 3,
+            "appVersion": "1.0.2",
             "shortcuts": [],
             "generatorApp": "bubblewrap-cli",
             "webManifestUrl": "https://nevahtovyj.netlify.app/manifest.json",
@@ -79,7 +79,11 @@ jobs:
         run: |
           sed -i 's/minSdkVersion [0-9]*/minSdkVersion 21/' app/build.gradle
           sed -i 's/targetSdkVersion [0-9]*/targetSdkVersion 34/' app/build.gradle
-          sed -i '/package="com.nevahtovyj.app"/d' app/src/main/AndroidManifest.xml
+          sed -i 's/ package="[^"]*"//' app/src/main/AndroidManifest.xml
+          echo "=== AndroidManifest.xml ==="
+          cat app/src/main/AndroidManifest.xml
+          echo "=== build.gradle ==="
+          grep -E 'minSdk|targetSdk|compileSdk' app/build.gradle
 
       - name: Build with Gradle
         run: |
@@ -107,7 +111,7 @@ jobs:
           
           $BT/apksigner verify --verbose --print-certs nevahtovyj.apk
 
-      - name: Get fingerprint and create assetlinks
+      - name: Create assetlinks
         run: |
           FINGERPRINT=$(keytool -list -v -keystore ./pwa.keystore -alias pwa -storepass android123 | grep SHA256 | awk '{print $NF}')
           echo "SHA-256: $FINGERPRINT"
@@ -124,7 +128,6 @@ jobs:
           }]
           ALEOF
           
-          echo "=== assetlinks.json ==="
           cat .well-known/assetlinks.json
 
       - name: Upload APK
