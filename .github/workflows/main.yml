@@ -54,8 +54,8 @@ jobs:
               "path": "./pwa.keystore",
               "alias": "pwa"
             },
-            "appVersionCode": 1,
-            "appVersion": "1.0.0",
+            "appVersionCode": 2,
+            "appVersion": "1.0.1",
             "shortcuts": [],
             "generatorApp": "bubblewrap-cli",
             "webManifestUrl": "https://nevahtovyj.netlify.app/manifest.json",
@@ -69,11 +69,21 @@ jobs:
             "playBilling": { "enabled": false },
             "alphaDependencies": { "enabled": false },
             "features": {},
-            "enableGooglePlayBilling": false
+            "enableGooglePlayBilling": false,
+            "minSdkVersion": 19,
+            "targetSdkVersion": 34
           }
           EOF
 
           yes "" | bubblewrap update --skipVersionUpgrade 2>&1 || true
+
+      - name: Fix minSdk for compatibility
+        run: |
+          sed -i 's/minSdkVersion [0-9]*/minSdkVersion 19/' app/build.gradle || true
+          
+          if grep -q 'targetSdkVersion' app/build.gradle; then
+            sed -i 's/targetSdkVersion [0-9]*/targetSdkVersion 34/' app/build.gradle
+          fi
 
       - name: Build with Gradle
         run: |
@@ -93,16 +103,43 @@ jobs:
             --ks-key-alias pwa \
             --ks-pass pass:android123 \
             --key-pass pass:android123 \
+            --v1-signing-enabled true \
             --v2-signing-enabled true \
             --v3-signing-enabled true \
+            --min-sdk-version 19 \
             --out nevahtovyj.apk \
             aligned.apk
           
-          $BT/apksigner verify --verbose nevahtovyj.apk
-          ls -la nevahtovyj.apk
+          $BT/apksigner verify --verbose --print-certs nevahtovyj.apk
+
+      - name: Get fingerprint and create assetlinks
+        run: |
+          FINGERPRINT=$(keytool -list -v -keystore ./pwa.keystore -alias pwa -storepass android123 | grep SHA256 | awk '{print $NF}')
+          echo "SHA-256: $FINGERPRINT"
+          
+          mkdir -p .well-known
+          cat > .well-known/assetlinks.json << ALEOF
+          [{
+            "relation": ["delegate_permission/common.handle_all_urls"],
+            "target": {
+              "namespace": "android_app",
+              "package_name": "com.nevahtovyj.app",
+              "sha256_cert_fingerprints": ["$FINGERPRINT"]
+            }
+          }]
+          ALEOF
+          
+          echo "=== assetlinks.json ==="
+          cat .well-known/assetlinks.json
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: nevahtovyj-apk
           path: nevahtovyj.apk
+
+      - name: Upload assetlinks
+        uses: actions/upload-artifact@v4
+        with:
+          name: assetlinks
+          path: .well-known/assetlinks.json
