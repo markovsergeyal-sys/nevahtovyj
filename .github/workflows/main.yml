@@ -69,21 +69,17 @@ jobs:
             "playBilling": { "enabled": false },
             "alphaDependencies": { "enabled": false },
             "features": {},
-            "enableGooglePlayBilling": false,
-            "minSdkVersion": 19,
-            "targetSdkVersion": 34
+            "enableGooglePlayBilling": false
           }
           EOF
 
           yes "" | bubblewrap update --skipVersionUpgrade 2>&1 || true
 
-      - name: Fix minSdk for compatibility
+      - name: Fix build config
         run: |
-          sed -i 's/minSdkVersion [0-9]*/minSdkVersion 19/' app/build.gradle || true
-          
-          if grep -q 'targetSdkVersion' app/build.gradle; then
-            sed -i 's/targetSdkVersion [0-9]*/targetSdkVersion 34/' app/build.gradle
-          fi
+          sed -i 's/minSdkVersion [0-9]*/minSdkVersion 21/' app/build.gradle
+          sed -i 's/targetSdkVersion [0-9]*/targetSdkVersion 34/' app/build.gradle
+          sed -i '/package="com.nevahtovyj.app"/d' app/src/main/AndroidManifest.xml
 
       - name: Build with Gradle
         run: |
@@ -106,7 +102,6 @@ jobs:
             --v1-signing-enabled true \
             --v2-signing-enabled true \
             --v3-signing-enabled true \
-            --min-sdk-version 19 \
             --out nevahtovyj.apk \
             aligned.apk
           
